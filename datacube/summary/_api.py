@@ -1,6 +1,7 @@
 from typing import Optional
 import json
 import logging
+from collections import namedtuple
 
 from sqlalchemy import select, func
 from datacube.index import Index, fields
@@ -26,7 +27,7 @@ class DatasetSpatial(object):
 
         return Dataset.crs.__get__(self)
 
-    @cached_property
+    @property
     def extent(self) -> Optional[geometry.Geometry]:
         """ :returns: valid extent of the dataset or None
         """
@@ -92,26 +93,34 @@ class SummaryAPI:  # pylint: disable=protected-access
 
         return result[0]
 
-    def search_returing_spatial(self, limit=None, **query):
+    # pylint: disable=too-many-locals
+    def search_returing_spatial(self, field_names=None, limit=None, **query):
 
-        id_field = NativeField('id', 'Dataset UUID', DATASET.c.id)
+        if field_names:
+            result_type = namedtuple('search_result', ('grid_spatial',) + tuple(field_names))
+        else:
+            result_type = namedtuple('search_result', ('grid_spatial',))
 
         for product, query_exprs in self.make_query_expr(query):
 
-            # product = self._index.products.get_by_name(product)
             dataset_section = product.metadata_type.definition['dataset']
             grid_spatial = dataset_section.get('grid_spatial')
 
             if not grid_spatial:
                 continue
 
+            dataset_fields = product.metadata_type.dataset_fields
             grid_spatial_field = SimpleDocField(
                 'grid_spatial', 'grid_spatial', DATASET.c.metadata,
                 False,
                 offset=dataset_section.get('grid_spatial') or ['grid_spatial']
             )
 
-            select_fields = tuple([id_field, grid_spatial_field])
+            select_fields = [grid_spatial_field]
+            if field_names:
+                for field_name in field_names:
+                    assert dataset_fields.get(field_name)
+                    select_fields.append(dataset_fields[field_name])
 
             with self._index._db.connect() as connection:
                 results = connection.search_datasets(
@@ -119,8 +128,12 @@ class SummaryAPI:  # pylint: disable=protected-access
                     select_fields=select_fields,
                     limit=limit
                 )
-            for uuid, grid_spatial in results:
-                yield DatasetSpatial(uuid, json.loads(grid_spatial))
+            for result in results:
+                if field_names and 'id' in field_names:
+                    uuid = result[field_names.index('id') + 1]
+                else:
+                    uuid = None
+                yield result_type(DatasetSpatial(uuid, json.loads(result[0])), *result[1:])
 
     def make_source_expr(self, source_filter):
 

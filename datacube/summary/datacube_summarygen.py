@@ -29,12 +29,12 @@ def cli(ctx, config):
     ctx.obj = Datacube(config=config).index
 
 
-def compute_extent(index, crs, **kwargs):
+def compute_extent(summary, crs, **kwargs):
 
     time_footprint = []
     geom = ogr.Geometry(ogr.wkbMultiPolygon)
 
-    datasets = index.datasets.search(**kwargs)
+    datasets = summary.search_returing_spatial(**kwargs)  # ToDo
     for dataset in datasets:
         time_footprint.append(dataset.center_time)
         if dataset.extent:
@@ -71,7 +71,7 @@ def compute_extent_periodic(index, product, freq, crs=None):
     month_start_list = rrule(freq, bymonthday=1, dtstart=time_min_, until=time_max)
 
     for time_range in _get_time_ranges(month_start_list):
-        yield compute_extent(index, crs, product=product, time=time_range)
+        yield compute_extent(summary, crs, product=product, time=time_range)
 
 
 def _get_time_ranges(date_list):
