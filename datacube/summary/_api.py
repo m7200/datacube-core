@@ -1,10 +1,11 @@
 from typing import Optional
+import json
 import logging
 
 from sqlalchemy import select, func
-from datacube.index import Index
+from datacube.index import Index, fields
 from datacube.model import Dataset
-from datacube.drivers.postgres._fields import DateDocField
+from datacube.drivers.postgres._fields import DateDocField, NativeField, SimpleDocField
 from datacube.drivers.postgres._schema import DATASET
 from datacube.utils import geometry, cached_property
 
@@ -14,7 +15,7 @@ _LOG = logging.getLogger(__name__)
 
 
 class DatasetSpatial(object):
-    def __init__(self, grid_spatial, uuid=None):
+    def __init__(self, uuid, grid_spatial):
         self._gs = grid_spatial
         self.id = uuid
 
@@ -91,5 +92,59 @@ class SummaryAPI:  # pylint: disable=protected-access
 
         return result[0]
 
-    def search_returing_spatial(self, **kwargs):
-        pass  # ToDo
+    def search_returing_spatial(self, limit=None, **query):
+
+        id_field = NativeField('id', 'Dataset UUID', DATASET.c.id)
+
+        for product, query_exprs in self.make_query_expr(query):
+
+            # product = self._index.products.get_by_name(product)
+            dataset_section = product.metadata_type.definition['dataset']
+            grid_spatial = dataset_section.get('grid_spatial')
+
+            if not grid_spatial:
+                continue
+
+            grid_spatial_field = SimpleDocField(
+                'grid_spatial', 'grid_spatial', DATASET.c.metadata,
+                False,
+                offset=dataset_section.get('grid_spatial') or ['grid_spatial']
+            )
+
+            select_fields = tuple([id_field, grid_spatial_field])
+
+            with self._index._db.connect() as connection:
+                results = connection.search_datasets(
+                    query_exprs,
+                    select_fields=select_fields,
+                    limit=limit
+                )
+            for uuid, grid_spatial in results:
+                yield DatasetSpatial(uuid, json.loads(grid_spatial))
+
+    def make_source_expr(self, source_filter):
+
+        assert source_filter
+
+        product_queries = list(self._index.datasets._get_product_queries(source_filter))
+        if not product_queries:
+            # No products match our source filter, so there will be no search results regardless.
+            raise ValueError('No products match source filter: ' % source_filter)
+        if len(product_queries) > 1:
+            raise RuntimeError("Multi-product source filters are not supported. Try adding 'product' field")
+
+        source_queries, source_product = product_queries[0]
+        dataset_fields = source_product.metadata_type.dataset_fields
+
+        return tuple(fields.to_expressions(dataset_fields.get, **source_queries))
+
+    def make_query_expr(self, query):
+
+        product_queries = list(self._index.datasets._get_product_queries(query))
+        if not product_queries:
+            raise ValueError('No products match search terms: %r' % query)
+
+        for q, product in product_queries:
+            dataset_fields = product.metadata_type.dataset_fields
+            query_exprs = tuple(fields.to_expressions(dataset_fields.get, **q))
+            yield product, query_exprs
