@@ -111,7 +111,7 @@ class SummaryAPI:  # pylint: disable=protected-access
         assert field_names
 
         class GS(object):
-            __slots__ = ('_gs',)
+            __slots__ = ('__dict__',)
 
         for product, query_exprs in self.make_query_expr(query):
 
@@ -126,13 +126,14 @@ class SummaryAPI:  # pylint: disable=protected-access
                     @property
                     def crs(self):
                         gs_ = GS()
-                        gs_._gs = self.grid_spatial
+                        gs_._gs = json.loads(self.grid_spatial)
                         return Dataset.crs.__get__(gs_)
 
                     @property
                     def extent(self):
                         gs_ = GS()
-                        gs_._gs = self.grid_spatial
+                        gs_._gs = json.loads(self.grid_spatial)
+                        gs_.crs = self.crs
                         return Dataset.extent.__get__(gs_, DatasetLight)
 
             with self._index._db.connect() as connection:
@@ -143,13 +144,7 @@ class SummaryAPI:  # pylint: disable=protected-access
                 )
 
             for result in results:
-                field_values = dict()
-                for index_, select_field in enumerate(select_fields):
-                    if select_field.name in fields_to_process:
-                        pass
-                    else:
-                        field_values[select_field.name] = result[index_]
-                yield DatasetLight(**field_values)
+                yield DatasetLight(**{field.name: result[i_] for i_, field in enumerate(select_fields)})
 
     def make_search_fields(self, product, field_names):
 
