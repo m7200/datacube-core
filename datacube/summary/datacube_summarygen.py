@@ -34,7 +34,7 @@ def compute_extent(summary, crs, **kwargs):
     time_footprint = []
     geom = ogr.Geometry(ogr.wkbMultiPolygon)
 
-    datasets = summary.search_returing_spatial(**kwargs)  # ToDo
+    datasets = summary.search_returing_datasets_light(**kwargs)  # ToDo
     for dataset in datasets:
         time_footprint.append(dataset.center_time)
         if dataset.extent:
